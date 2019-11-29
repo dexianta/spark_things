@@ -1,12 +1,12 @@
 package com.dexian
 
 
-import java.sql.Timestamp
-import java.time.{Duration, LocalDateTime}
+import java.sql.{Date, Timestamp}
+import java.time.{Duration, LocalDate, LocalDateTime}
 import java.time.format.DateTimeFormatter
 
 import com.github.javafaker.Faker
-import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.{SaveMode, SparkSession}
 
 import scala.util.Random
 
@@ -16,18 +16,18 @@ import scala.util.Random
 
 
 object utils {
-  def get_random_date_within(start: LocalDateTime, end: LocalDateTime): Timestamp = {
+  def get_random_date_within(start: LocalDateTime, end: LocalDateTime): Date = {
     val random = new Random()
     val duration = Duration.between(start, end).toDays.toInt
     val rand_day = random.nextInt(duration)
-    Timestamp.valueOf(start.plusDays(rand_day))
+    Date.valueOf(start.plusDays(rand_day).toLocalDate)
   }
 
-  case class salesRecords(date: Timestamp,
+  case class salesRecords(date: Date,
                           name: String,
                           address: String,
                           phoneNumber: String,
-                          curreny: String,
+                          currency: String,
                           code: String,
                           amount: Float)
 
@@ -46,22 +46,30 @@ object utils {
   def get_random_records(faker: Faker, start: LocalDateTime, end: LocalDateTime, num_of_records: Int): Seq[salesRecords] = {
     (0 to num_of_records).par.map(_ => get_one_random_record(faker, start, end)).seq
   }
+
+  def create_random_records_save_csv(spark: SparkSession, num_of_rows: Int):Unit = {
+    import spark.implicits._
+    val formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")
+    val start_date = LocalDateTime.parse("01/03/2016 00:00:00", formatter)
+    val end_date = LocalDateTime.parse("01/09/2019 00:00:00", formatter)
+
+    val faker = new Faker()
+    val records = utils.get_random_records(faker, start_date, end_date, num_of_rows)
+    val df = spark.createDataset(records) //.toDF("date", "name", "address", "phoneNumber", "currency", "code", "amount")
+
+    df.write.option("header", "true").mode(SaveMode.Overwrite).csv("/home/dexianta/spark_things/file_things/data/sales/")
+  }
 }
 
 object MainEntry extends App {
   val spark = SparkSession.builder().appName("files").master("local[*]").getOrCreate()
-  import spark.implicits._
+  utils.create_random_records_save_csv(spark, 5e6.toInt)
+  val df = spark.read.option("header", "true").option("inferSchema", "true").csv("/home/dexianta/spark_things/file_things/data/sales/")
+  df.write.mode(SaveMode.Overwrite).format("avro").save("/home/dexianta/spark_things/file_things/data/sales_avro/")
+  df.write.mode(SaveMode.Overwrite).format("parquet").save("/home/dexianta/spark_things/file_things/data/sales_parquet/")
 
-  val formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss")
-  val start_date = LocalDateTime.parse("01/03/2016 10:01:10", formatter)
-  val end_date = LocalDateTime.parse("01/09/2019 00:00:00", formatter)
-
-  val faker = new Faker()
-  val records = utils.get_random_records(faker, start_date, end_date, 1e6.toInt)
-  val df = spark.createDataset(records)
-
-  df.printSchema
-  df.show
+//  df.printSchema()
+//  df.show()
 
 
   println("hello, you've succeed")
